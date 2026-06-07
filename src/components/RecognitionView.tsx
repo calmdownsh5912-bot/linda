@@ -11,11 +11,16 @@ export default function RecognitionView() {
   const [isLoading, setIsLoading] = useState(false);
   const [step, setStep] = useState<'upload' | 'edit' | 'generate'>('upload');
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [variations, setVariations] = useState<Question[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const { addMistake } = useMistakes();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const SUBJECTS = ['数学', '英语', '语文', '物理', '化学', '生物', '历史', '地理', '政治', '其他'];
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -30,13 +35,18 @@ export default function RecognitionView() {
 
   const processImage = async (base64: string) => {
     setIsLoading(true);
+    setError(null);
     try {
       const result = await recognizeMistake(base64);
       setOcrResult(result);
       setStep('edit');
-    } catch (error) {
-      console.error('Recognition failed:', error);
-      alert('识别失败，请重试');
+    } catch (err: any) {
+      console.error('Recognition failed:', err);
+      let msg = err.message || '识别失败，请重试';
+      if (msg.includes('<!doctype html>') || msg.includes('Unexpected token')) {
+        msg = '未检测到正在运行的后端服务接口（返回了 HTML）。如果您使用的是 Vercel 静态托管，请在构建设置中确保后端 API 正确打通，或检查 GEMINI_API_KEY 是否设置。';
+      }
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -45,13 +55,18 @@ export default function RecognitionView() {
   const handleGenerate = async () => {
     if (!ocrResult) return;
     setIsLoading(true);
+    setError(null);
     try {
       const vars = await generateVariations(ocrResult.content, ocrResult.knowledgePoint);
       setVariations(vars);
       setStep('generate');
-    } catch (error) {
-      console.error('Generation failed:', error);
-      alert('生成失败，请重试');
+    } catch (err: any) {
+      console.error('Generation failed:', err);
+      let msg = err.message || '变式生成失败，请重试';
+      if (msg.includes('<!doctype html>') || msg.includes('Unexpected token')) {
+        msg = '未检测到正在运行的后端服务接口（返回了 HTML）。';
+      }
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -70,6 +85,7 @@ export default function RecognitionView() {
         analysis: '',
       },
       knowledgePoint: ocrResult.knowledgePoint,
+      subject: ocrResult.subject || '其他',
       variations,
       createdAt: Date.now(),
     };
@@ -82,11 +98,35 @@ export default function RecognitionView() {
     setImage(null);
     setOcrResult(null);
     setVariations([]);
+    setIsEditing(false);
     setStep('upload');
+  };
+
+  const handleFieldChange = (field: keyof OCRResult, value: any) => {
+    if (!ocrResult) return;
+    setOcrResult({
+      ...ocrResult,
+      [field]: value,
+    });
   };
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex-1 text-sm font-medium">
+            <h4 className="font-bold mb-1 text-rose-900">系统异常/配置问题</h4>
+            <p className="leading-relaxed whitespace-pre-wrap">{error}</p>
+          </div>
+          <button 
+            onClick={() => setError(null)}
+            className="p-1 hover:bg-rose-100 rounded-lg text-rose-600 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {step === 'upload' && (
         <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
           <div 
@@ -109,7 +149,10 @@ export default function RecognitionView() {
             />
           </div>
           <div className="flex gap-4">
-            <button className="flex items-center gap-2 px-4 py-2 text-neutral-500 hover:text-neutral-700 transition-colors">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 text-neutral-500 hover:text-neutral-700 transition-colors"
+            >
               <ImageIcon size={20} />
               <span className="text-sm">从相册选择</span>
             </button>
@@ -130,19 +173,56 @@ export default function RecognitionView() {
             <div className="p-4 bg-neutral-50 border-b border-neutral-100 flex items-center justify-between">
               <h2 className="font-bold flex items-center gap-2">
                 <Sparkles size={18} className="text-amber-500" />
-                识别结果
+                识别结果 {isEditing ? '(编辑中)' : ''}
               </h2>
-              <button onClick={reset} className="p-1 hover:bg-neutral-200 rounded-full transition-colors">
-                <X size={18} className="text-neutral-400" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setIsEditing(!isEditing)}
+                  className="px-3 py-1 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors"
+                >
+                  {isEditing ? '确认修改' : '手动修改'}
+                </button>
+                <button onClick={reset} className="p-1 hover:bg-neutral-200 rounded-full transition-colors">
+                  <X size={18} className="text-neutral-400" />
+                </button>
+              </div>
             </div>
             
             <div className="p-6 space-y-6">
+              {/* Subject Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">题目学科</label>
+                <div className="flex flex-wrap gap-2">
+                  {SUBJECTS.map((subject) => (
+                    <button
+                      key={subject}
+                      onClick={() => handleFieldChange('subject', subject)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-xl text-sm font-medium border transition-all",
+                        ocrResult.subject === subject
+                          ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                          : "bg-white border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                      )}
+                    >
+                      {subject}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">题目内容</label>
-                <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-100">
-                  <Markdown>{ocrResult.content}</Markdown>
-                </div>
+                {isEditing ? (
+                  <textarea
+                    value={ocrResult.content}
+                    onChange={(e) => handleFieldChange('content', e.target.value)}
+                    className="w-full min-h-[120px] p-4 bg-neutral-50 rounded-2xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  />
+                ) : (
+                  <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-100">
+                    <Markdown>{ocrResult.content}</Markdown>
+                  </div>
+                )}
               </div>
 
               {ocrResult.options && ocrResult.options.length > 0 && (
@@ -156,17 +236,35 @@ export default function RecognitionView() {
               )}
 
               <div className="flex flex-wrap gap-4 pt-4 border-t border-neutral-100">
-                <div className="flex-1 min-w-[200px]">
+                <div className="flex-1 min-w-[200px] space-y-1">
                   <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">知识点</label>
-                  <div className="mt-1 flex items-center gap-2 text-indigo-600 font-semibold text-lg">
-                    <span>{ocrResult.knowledgePoint}</span>
-                  </div>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={ocrResult.knowledgePoint}
+                      onChange={(e) => handleFieldChange('knowledgePoint', e.target.value)}
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    />
+                  ) : (
+                    <div className="mt-1 flex items-center gap-2 text-indigo-600 font-semibold text-lg">
+                      <span>{ocrResult.knowledgePoint}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1 min-w-[200px]">
+                <div className="flex-1 min-w-[200px] space-y-1">
                    <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">参考答案</label>
-                   <div className="mt-1 text-sm font-medium text-emerald-600">
-                    {ocrResult.standardAnswer || '未识别到答案'}
-                   </div>
+                   {isEditing ? (
+                     <input
+                       type="text"
+                       value={ocrResult.standardAnswer || ''}
+                       onChange={(e) => handleFieldChange('standardAnswer', e.target.value)}
+                       className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                     />
+                   ) : (
+                     <div className="mt-1 text-sm font-medium text-emerald-600">
+                      {ocrResult.standardAnswer || '未识别到答案'}
+                     </div>
+                   )}
                 </div>
               </div>
 

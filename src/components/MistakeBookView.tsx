@@ -10,7 +10,15 @@ export default function MistakeBookView() {
   const { mistakes, deleteMistakes } = useMistakes();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<string>('全部');
   const printRef = useRef<HTMLDivElement>(null);
+
+  const SUBJECTS = ['全部', '数学', '英语', '语文', '物理', '化学', '生物', '历史', '地理', '政治', '其他'];
+
+  const getSubjectCount = (sub: string) => {
+    if (sub === '全部') return mistakes.length;
+    return mistakes.filter(m => m.subject === sub).length;
+  };
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -24,10 +32,17 @@ export default function MistakeBookView() {
   };
 
   const selectAll = () => {
-    if (selectedIds.length === mistakes.length) {
-      setSelectedIds([]);
+    const filtered = selectedSubject === '全部' 
+      ? mistakes 
+      : mistakes.filter(m => m.subject === selectedSubject);
+      
+    const filteredIds = filtered.map(m => m.id);
+    const allSelected = filteredIds.every(id => selectedIds.includes(id));
+
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !filteredIds.includes(id)));
     } else {
-      setSelectedIds(mistakes.map(m => m.id));
+      setSelectedIds(prev => Array.from(new Set([...prev, ...filteredIds])));
     }
   };
 
@@ -39,20 +54,29 @@ export default function MistakeBookView() {
     }
   };
 
+  const filteredMistakes = selectedSubject === '全部' 
+    ? mistakes 
+    : mistakes.filter(m => m.subject === selectedSubject);
+
   const selectedMistakes = mistakes.filter(m => selectedIds.includes(m.id));
+
+  const isAllSelectedOnFiltered = () => {
+    if (filteredMistakes.length === 0) return false;
+    return filteredMistakes.every(m => selectedIds.includes(m.id));
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold">我的错题本</h2>
         <div className="flex items-center gap-2">
-          {mistakes.length > 0 && (
+          {filteredMistakes.length > 0 && (
             <>
               <button 
                 onClick={selectAll}
-                className="text-sm font-medium text-neutral-500 hover:text-indigo-600 transition-colors"
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
               >
-                {selectedIds.length === mistakes.length ? '取消全选' : '全选'}
+                {isAllSelectedOnFiltered() ? '取消全选' : '选择当前学科全部'}
               </button>
               {selectedIds.length > 0 && (
                 <button 
@@ -67,14 +91,43 @@ export default function MistakeBookView() {
         </div>
       </div>
 
-      {mistakes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-neutral-400 space-y-4">
+      {mistakes.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none mask-image">
+          {SUBJECTS.map((sub) => {
+            const count = getSubjectCount(sub);
+            if (count === 0 && sub !== '全部') return null; // Only show active subjects
+            return (
+              <button
+                key={sub}
+                onClick={() => setSelectedSubject(sub)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all whitespace-nowrap",
+                  selectedSubject === sub
+                    ? "bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-100"
+                    : "bg-white border-neutral-150 text-neutral-500 hover:border-neutral-300"
+                )}
+              >
+                <span>{sub}</span>
+                <span className={cn(
+                  "px-1.5 py-0.2 text-[10px] rounded-md",
+                  selectedSubject === sub ? "bg-indigo-500 text-white" : "bg-neutral-100 text-neutral-500"
+                )}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {filteredMistakes.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-neutral-400 space-y-4 bg-white rounded-3xl border border-neutral-100 p-8 shadow-sm">
           <FileText size={64} strokeWidth={1} />
-          <p>暂无错题记录，去“题目识别”添加吧</p>
+          <p>{mistakes.length === 0 ? '暂无错题记录，去“题目识别”添加吧' : `暂无“${selectedSubject}”学科下的错题记录`}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {mistakes.map((entry) => (
+          {filteredMistakes.map((entry) => (
             <div 
               key={entry.id}
               className={cn(
@@ -107,9 +160,14 @@ export default function MistakeBookView() {
                 
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="px-2 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-lg uppercase tracking-wider">
-                      {entry.knowledgePoint}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-lg uppercase tracking-wider">
+                        {entry.subject || '其他'}
+                      </span>
+                      <span className="px-2 py-0.5 bg-neutral-100 text-neutral-700 text-[10px] font-bold rounded-lg uppercase tracking-wider">
+                        {entry.knowledgePoint}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1 text-[10px] font-medium text-neutral-400">
                       <Calendar size={12} />
                       {new Date(entry.createdAt).toLocaleDateString()}
@@ -135,7 +193,12 @@ export default function MistakeBookView() {
               {viewingId === entry.id && (
                 <div className="mt-6 pt-6 border-t border-dashed border-neutral-100 space-y-8 animate-in fade-in zoom-in-95">
                   <div className="space-y-3">
-                    <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">原题回顾</h4>
+                    <div className="flex justify-between items-center">
+                      <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">原题回顾</h4>
+                      <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2.5 py-1 rounded-lg">
+                        {entry.subject || '其他'}课程
+                      </span>
+                    </div>
                     <div className="p-4 bg-neutral-50 rounded-2xl">
                       <Markdown>{entry.originalQuestion.content}</Markdown>
                       {entry.originalQuestion.answer && (
@@ -151,7 +214,7 @@ export default function MistakeBookView() {
                     {entry.variations.map((v, i) => (
                       <div key={v.id} className="p-4 bg-white border border-neutral-100 rounded-2xl shadow-sm space-y-3">
                          <div className="flex items-center gap-2">
-                           <span className="text-xs font-bold text-indigo-600">练习 {i+1}</span>
+                           <span className="text-xs font-bold text-indigo-600">变式练习 {i+1}</span>
                          </div>
                          <Markdown>{v.content}</Markdown>
                          <details className="group mt-2">
@@ -178,7 +241,7 @@ export default function MistakeBookView() {
       )}
 
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-24 left-0 right-0 p-4 md:px-0">
+        <div className="fixed bottom-24 left-0 right-0 p-4 md:px-0 z-40">
           <div className="max-w-4xl mx-auto flex gap-3">
             <button 
               onClick={() => handlePrint()}
@@ -203,7 +266,10 @@ export default function MistakeBookView() {
             <div key={entry.id} className="space-y-8 page-break-after-always">
               <div className="flex items-center gap-4">
                 <span className="bg-neutral-900 text-white px-4 py-1 text-xl font-black rounded-lg"># {index + 1}</span>
-                <h2 className="text-xl font-bold flex-1 border-b border-neutral-300 pb-1">知识点：{entry.knowledgePoint}</h2>
+                <span className="text-sm font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 uppercase tracking-wider">
+                  【{entry.subject || '其他'}】
+                </span>
+                <h2 className="text-xl font-bold flex-1 border-b border-neutral-300 pb-1">核心知识点：{entry.knowledgePoint}</h2>
               </div>
 
               <section className="space-y-4">
